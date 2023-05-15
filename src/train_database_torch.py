@@ -5,16 +5,27 @@ from torch.utils.data import DataLoader, Dataset
 from torchinfo import summary
 from early_stop import early_stop
 from tqdm import tqdm
+import os,shutil
+import matplotlib.pyplot as plt
 
-s10 = './train_data_0130/train_data_0130_s10_valid_100000.txt'
 
 ### Config
+CURRENT_PATH = os.path.dirname(__file__)
+BEFORE_PATH = os.path.abspath(os.path.join(CURRENT_PATH, os.path.pardir)) 
+s10 = f'{BEFORE_PATH}/train_data_0130/train_data_0130_s10_valid_100000.txt'
 BOARD_SIZE = 8
 MAXLEN = 128
 BATCH_SIZE = 32
 EPOCHS = 10000
-LR = 1e-3
-EARLY_STOP = early_stop(save_path='E:/hsuanchia_e/Othello_2022/s10_allvalid_multilabel_weights/torch/', mode='min', monitor='val_loss', patience=5)
+LR = 1e-4
+WEIGHT_SAVE_PATH = f'{CURRENT_PATH}/s10_allvalid_multilabel_weights/torch/'
+EARLY_STOP = early_stop(save_path=f'{WEIGHT_SAVE_PATH}', mode='min', monitor='val_loss', patience=10)
+try:
+    shutil.rmtree(WEIGHT_SAVE_PATH)
+except:
+    pass
+os.makedirs(WEIGHT_SAVE_PATH)
+
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print("device:", device)
 
@@ -140,38 +151,54 @@ class CNN1D(nn.Module):
 
         return x
 
-### Customize loss function
 class OthelloLoss(nn.Module):
     def __init__(self):
         super(OthelloLoss, self).__init__()
-
+        
     def forward(self, pred, label, th):
-        BCE_loss = nn.BCELoss()(pred, label)
-        pred = torch.where(pred > th, True, False)
-        label = torch.where(label == 1.0, True, False)
-        # for i in range(len(pred)):
-        xor = torch.bitwise_xor(pred, label)
-        wrong_pred = torch.bitwise_and(pred, xor)
-        miss_pred = torch.bitwise_xor(xor, wrong_pred)
-        tmp1 = torch.where(miss_pred == True, 1, 0)
-        miss_sum = torch.sum(tmp1, 1)
-        tmp2 = torch.where(wrong_pred == True, 1, 0)
-        wrong_sum = torch.sum(tmp2, 1)
-        win_pos = torch.sum(torch.where(label == True, 1, 0), 1)
+       
+        sub_tmp = pred - label
+        #print('pred',pred)
+        #print('label',label)
+        #print('sub_tmp',sub_tmp)
+        sub_miss = torch.where((sub_tmp<(-0.5)),sub_tmp,0.0)
+        sub_wrong = torch.where((sub_tmp>0.5),sub_tmp,0.0)
+        sub_miss_wrong = torch.add(sub_miss,sub_wrong)
+        #print('sub_miss',sub_miss)
+        #print('sub_wrong',sub_wrong)
+        #print(sub_miss_wrong)
+        sub_result = torch.where((sub_miss_wrong<0.0), (1.0+sub_miss_wrong)*10000, sub_miss_wrong*10000)
+        #print('sub_result',sub_result)
+        sub_result = torch.sum(sub_result,dim=1)
+        #print('sub_result',sub_result)
+        sub_result = torch.mean(sub_result)
+        #print(sub_result)
+        return sub_result
+    
+def OthelloLoss_(pred, label, th):
+    
+    pred = torch.where(pred > th, True, False)
+    label = torch.where(label == 1.0, True, False)
 
-        wrong_loss = torch.div(torch.div(wrong_sum, len(wrong_sum)), (BOARD_SIZE)) 
-        wrong_loss = torch.nan_to_num(wrong_loss, nan=0.0)
-        wrong_batch_loss = torch.div(torch.sum(wrong_loss), len(wrong_loss))
-        miss_loss = torch.div(torch.div(miss_sum, len(miss_sum)), win_pos) 
-        miss_loss = torch.nan_to_num(miss_loss, nan=0.0)
-        miss_batch_loss = torch.div(torch.sum(miss_loss), len(miss_loss))
+    #ex: p:110 g:011
+    pred_gt_or = torch.bitwise_or(pred, label)                          #pred+gt where 1                     =>110 or 011 = 111
+    denominator = torch.sum(torch.where(pred_gt_or == True, 1, 0),1)    #total pred+gt where 1 position      =>p or q:111 => 3
 
-        # print(f"BCE_Loss: {BCE_loss}, Wrong_Loss: {wrong_batch_loss}, Miss_Loss: {miss_batch_loss}")
+    pred_gt_xor = torch.bitwise_xor(pred, label)                        #not correct position                =>110 xor 011 = 101
+    molecular =  torch.sum(torch.where(pred_gt_xor == True, 1, 0),1)    #total pred not correct num          =>p xor q:101 => 2 
+    position_loss = molecular / denominator                             #position loss = (not correct num) / (total postion num)
+    position_loss = torch.nan_to_num(position_loss, nan=0.0)
+    position_batch_loss =  torch.div(torch.sum(position_loss), len(position_loss))
 
-        total_loss = BCE_loss + wrong_batch_loss + miss_batch_loss
-        # print(total_loss)
+    wrong_and_xor = torch.bitwise_and(pred,pred_gt_xor)                     #wrong postion                       =>p and(p xor q) =  110 and 101 = 100
+    wrong_num =  torch.sum(torch.where(wrong_and_xor == True, 1, 0),1)      #wrong num                           => p and(p xor q) = 100 => 1  
+    wrong_penalty_loss = 0.5 * wrong_num
+    wrong_penalty_batch_loss = torch.div(torch.sum(wrong_penalty_loss), len(wrong_penalty_loss))
 
-        return total_loss
+    total_loss = position_batch_loss + wrong_penalty_batch_loss
+    
+    
+    return total_loss
 
 ### Customize accuracy function
 def evaluate_accuracy(pred, label):
@@ -204,12 +231,16 @@ def train(train_loader, val_loader, model, batch_size, optimizer, loss_func, acc
             train_y = train_y.to(device, dtype=torch.float)
             #img經過nural network卷積後的預測(前向傳播),跟答案計算loss 
             pred = model(train_x)
-            criterion = loss_func()
-            loss = criterion(pred, train_y, th=0.5)
+            
+            #criterion = loss_func()
+            #loss = criterion(pred, train_y, th=0.5)
+            loss = loss_func(pred, train_y)       
+
             #優化器的gradient每次更新要記得初始化,否則會一直累積
             optimizer.zero_grad()
             #反向傳播偏微分,更新參數值
             loss.backward()
+
             #更新優化器
             optimizer.step()
 
@@ -265,8 +296,9 @@ def validation(val_loader, model, loss_func, acc_func):
 
             pred = model(val_x)
 
-            criterion = loss_func()
-            loss = criterion(pred, val_y, th=0.5)
+            #criterion = loss_func()
+            #loss = criterion(pred, val_y, th=0.5)
+            loss = loss_func(pred, val_y)
             #累加每個batch的loss後續再除step數量
             val_avg_loss += loss.item()
 
@@ -287,6 +319,29 @@ def validation(val_loader, model, loss_func, acc_func):
 
     return val_avg_loss, val_avg_acc
 
+def plot_statistics(train_loss,
+                    train_acc,
+                    valid_loss,
+                    valid_acc,
+                    SAVE_MODELS_PATH):
+    '''
+    統計train、valid的loss、acc
+    '''
+    fig, ax = plt.subplots()
+    epcoh = [x for x in range(len(train_loss))]
+    ax2 = ax.twinx()
+    t_loss = ax.plot(train_loss,color='green',label='train_loss')
+    v_loss = ax.plot(valid_loss,color='red',label='valid_loss')
+    t_acc = ax2.plot(train_acc,color='#00FF55',label='train_acc')
+    v_acc = ax2.plot(valid_acc,color='#FF5500',label='valid_acc')
+    ax.set_xlabel("epoch")
+    ax.set_ylabel("loss")
+    ax2.set_ylabel("acc")
+    ax.legend(loc='upper left')
+    ax2.legend(loc='upper right')
+    plt.savefig(f'{SAVE_MODELS_PATH}/train_statistics',bbox_inches='tight')
+    plt.figure()
+
 if __name__ == '__main__':
     x, y = build_data_1d(s10)
     total_len = len(x)
@@ -304,6 +359,7 @@ if __name__ == '__main__':
     val_dataloader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=True)
 
     model = CNN1D()
+    loss_func = nn.BCELoss()
     print(model)
     print(summary(model, (BATCH_SIZE, 64, 1)))
 
@@ -312,5 +368,8 @@ if __name__ == '__main__':
     train_loss, train_acc, val_loss, val_acc = train(
         train_loader=train_dataloader, val_loader=val_dataloader, 
         model=model, batch_size=BATCH_SIZE, optimizer=OPTIMIZER,
-        loss_func=OthelloLoss, acc_func=evaluate_accuracy, epoch=EPOCHS
+        loss_func=loss_func, acc_func=evaluate_accuracy, epoch=EPOCHS
     )
+
+    plot_statistics(train_loss, train_acc, val_loss, val_acc, WEIGHT_SAVE_PATH)
+
