@@ -5,7 +5,7 @@ from torch.utils.data import DataLoader, Dataset
 from torchinfo import summary
 from early_stop import early_stop
 from tqdm import tqdm
-import os,shutil
+import os, shutil
 import matplotlib.pyplot as plt
 
 ### Configs
@@ -111,7 +111,7 @@ class CNN2D(nn.Module):
         self.drop = nn.Dropout(0.2)
         
         self.maxpool = nn.MaxPool2d(kernel_size=2, stride=1)
-        self.linear1 = nn.Linear(784, 128)
+        self.linear1 = nn.Linear(1152, 128)
         self.linear2 = nn.Linear(128, 64)
         self.linear3 = nn.Linear(64, 64)
 
@@ -119,9 +119,9 @@ class CNN2D(nn.Module):
         x = self.conv1(x)
         x = nn.functional.relu(x)
         x = self.maxpool(x)
-        # x = self.conv2(x)
-        # x = nn.functional.relu(x)
-        # x = self.maxpool(x)
+        x = self.conv2(x)
+        x = nn.functional.relu(x)
+        x = self.maxpool(x)
         x = self.flat(x)
         x = self.linear1(x)
         x = nn.functional.relu(x)
@@ -200,16 +200,38 @@ def inference(data_loader, model):
 
 if __name__ == '__main__':
     model = CNN2D()
-    model.load_state_dict(torch.load('D:/AIIA_En/othello/Othello_2022/src/s10_allvalid_multilabel_weights_conv2d/torch/epoch_228_trainLoss_0.0604_trainAcc_57.26_valLoss_0.07_valAcc_54.12.pth'))
+    
+    model.load_state_dict(torch.load('E:/hsuanchia_e/Othello_2022/src/s11_allvalid_multilabel_weights_conv2d_l2/torch/epoch_219_trainLoss_0.0701_trainAcc_63.75_valLoss_0.0788_valAcc_61.85.pth'))
     model.to(device)
-    test_path = './train_data_0130/test_data_0214_s10_valid_100001.txt'
+    test_path = './train_data_0130/test_data_0214_s11_valid_100001.txt'
 
     hit, total = 0, 0
     get_ans = True
     test_x, test_y = build_test_data_2d(test_path)
     print(f'Data length: {len(test_x)}')
 
-    test_ds = OthelloBoard2d(test_x, test_y)
+    win, lose = {'board' : [], 'label' : []}, {'board' : [], 'label' : []}
+    all_zero = [0] * 64
+    for i in range(len(test_x)):
+        if(test_y[i] == all_zero):
+            lose['board'].append(test_x[i])
+            lose['label'].append(test_y[i])
+        else:
+            win['board'].append(test_x[i])
+            win['label'].append(test_y[i])
+
+    # print("win: ", len(win['board']))
+    # print("win: ", len(win['label']))
+
+    # print("lose: ", len(lose['board']))
+    # print("lose: ", len(lose['label']))
+
+    x = win['board'][:14000]
+    y = win['label'][:14000]
+    x.extend(lose['board'][:6000])
+    y.extend(lose['label'][:6000])
+
+    test_ds = OthelloBoard2d(x, y)
     test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE)
 
     test_acc = inference(test_loader, model)
