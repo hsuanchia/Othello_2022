@@ -80,7 +80,7 @@ class CNN1D(nn.Module):
         self.drop = nn.Dropout(0.2)
         
         self.maxpool = nn.MaxPool1d(kernel_size=2, stride=1)
-        self.linear1 = nn.Linear(1008, 128)
+        self.linear1 = nn.Linear(1984, 128)
         self.linear2 = nn.Linear(128, 64)
         self.linear3 = nn.Linear(64, 64)
 
@@ -89,9 +89,9 @@ class CNN1D(nn.Module):
         x = self.conv1(x)
         x = nn.functional.relu(x)
         x = self.maxpool(x)
-        # x = self.conv2(x)
-        # x = nn.functional.relu(x)
-        # x = self.maxpool(x)
+        x = self.conv2(x)
+        x = nn.functional.relu(x)
+        x = self.maxpool(x)
         x = self.flat(x)
         x = self.linear1(x)
         x = nn.functional.relu(x)
@@ -119,9 +119,9 @@ class CNN2D(nn.Module):
         x = self.conv1(x)
         x = nn.functional.relu(x)
         x = self.maxpool(x)
-        x = self.conv2(x)
-        x = nn.functional.relu(x)
-        x = self.maxpool(x)
+        # x = self.conv2(x)
+        # x = nn.functional.relu(x)
+        # x = self.maxpool(x)
         x = self.flat(x)
         x = self.linear1(x)
         x = nn.functional.relu(x)
@@ -185,10 +185,11 @@ def inference(data_loader, model):
             ### Evaluate accuracy
             # pred = pred.detach().cpu().numpy().tolist()
             test_y = test_y.detach().cpu().numpy().tolist()
+            th = 0.5
             hit = 0
             ans = pred.argmax(dim=1)
             for i in range(len(ans)):
-                if test_y[i][int(ans[i])] == 1.0:
+                if test_y[i][int(ans[i])] == 1.0 and pred[i][ans[i]] > th:
                         hit += 1
                 # hit += acc_func(pred[i], val_y[i])
             batch_acc = hit / len(pred)
@@ -199,15 +200,15 @@ def inference(data_loader, model):
     return test_avg_acc
 
 if __name__ == '__main__':
-    model = CNN2D()
+    model = CNN1D()
     
-    model.load_state_dict(torch.load('E:/hsuanchia_e/Othello_2022/src/s11_allvalid_multilabel_weights_conv2d_l2/torch/epoch_219_trainLoss_0.0701_trainAcc_63.75_valLoss_0.0788_valAcc_61.85.pth'))
+    model.load_state_dict(torch.load('E:/hsuanchia_e/Othello_2022/src/s11_allvalid_multilabel_weights_conv1d_l2/torch/epoch_176_trainLoss_0.0516_trainAcc_67.45_valLoss_0.065_valAcc_64.55.pth'))
     model.to(device)
     test_path = './train_data_0130/test_data_0214_s11_valid_100001.txt'
 
     hit, total = 0, 0
     get_ans = True
-    test_x, test_y = build_test_data_2d(test_path)
+    test_x, test_y = build_test_data_1d(test_path)
     print(f'Data length: {len(test_x)}')
 
     win, lose = {'board' : [], 'label' : []}, {'board' : [], 'label' : []}
@@ -220,18 +221,18 @@ if __name__ == '__main__':
             win['board'].append(test_x[i])
             win['label'].append(test_y[i])
 
-    # print("win: ", len(win['board']))
-    # print("win: ", len(win['label']))
+    print("win: ", len(win['board']))
+    print("win: ", len(win['label']))
 
-    # print("lose: ", len(lose['board']))
-    # print("lose: ", len(lose['label']))
+    print("lose: ", len(lose['board']))
+    print("lose: ", len(lose['label']))
 
     x = win['board'][:14000]
     y = win['label'][:14000]
     x.extend(lose['board'][:6000])
     y.extend(lose['label'][:6000])
 
-    test_ds = OthelloBoard2d(x, y)
+    test_ds = OthelloBoard(x, y)
     test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE)
 
     test_acc = inference(test_loader, model)
