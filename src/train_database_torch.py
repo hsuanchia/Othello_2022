@@ -12,13 +12,13 @@ import matplotlib.pyplot as plt
 ### Config
 CURRENT_PATH = os.path.dirname(__file__)
 BEFORE_PATH = os.path.abspath(os.path.join(CURRENT_PATH, os.path.pardir)) 
-s10 = f'{BEFORE_PATH}/train_data_0130/train_data_0130_s10_valid_100000.txt'
+s10 = f'{BEFORE_PATH}/train_data_0130/train_data_0130_s11_valid_100000.txt'
 BOARD_SIZE = 8
 MAXLEN = 128
 BATCH_SIZE = 32
 EPOCHS = 10000
 LR = 1e-4
-WEIGHT_SAVE_PATH = f'{CURRENT_PATH}/s10_allvalid_multilabel_weights/torch/'
+WEIGHT_SAVE_PATH = f'{CURRENT_PATH}/s11_allvalid_multilabel_weights_conv2d/torch/'
 EARLY_STOP = early_stop(save_path=f'{WEIGHT_SAVE_PATH}', mode='min', monitor='val_loss', patience=10)
 try:
     shutil.rmtree(WEIGHT_SAVE_PATH)
@@ -118,7 +118,7 @@ class OthelloBoard(Dataset):
     def __len__(self):
         return len(self.x)
     def __getitem__(self, ind):
-        train_x = np.expand_dims(self.x[ind], axis=1)
+        train_x = np.expand_dims(self.x[ind], axis=0)
         train_y = self.y[ind]
         return torch.tensor(train_x), torch.tensor(train_y)
 
@@ -132,7 +132,7 @@ class CNN1D(nn.Module):
         self.drop = nn.Dropout(0.2)
         
         self.maxpool = nn.MaxPool1d(kernel_size=2, stride=1)
-        self.linear1 = nn.Linear(1008, 128)
+        self.linear1 = nn.Linear(1984, 128)
         self.linear2 = nn.Linear(128, 64)
         self.linear3 = nn.Linear(64, 64)
 
@@ -141,6 +141,39 @@ class CNN1D(nn.Module):
         x = self.conv1(x)
         x = nn.functional.relu(x)
         x = self.maxpool(x)
+        x = self.conv2(x)
+        x = nn.functional.relu(x)
+        x = self.maxpool(x)
+        x = self.flat(x)
+        x = self.linear1(x)
+        x = nn.functional.relu(x)
+        x = self.linear2(x)
+        x = nn.functional.relu(x)
+        x = self.linear3(x)
+        x = nn.functional.sigmoid(x)
+
+        return x
+
+class CNN2D(nn.Module):
+    def __init__(self) -> None:
+        super(CNN2D, self).__init__()
+        self.conv1 = nn.Conv2d(in_channels=1, out_channels=16, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(in_channels=16, out_channels=32, kernel_size=3, padding=1)
+        self.flat  = nn.Flatten()
+        self.drop = nn.Dropout(0.2)
+        
+        self.maxpool = nn.MaxPool2d(kernel_size=2, stride=1)
+        self.linear1 = nn.Linear(784, 128)
+        self.linear2 = nn.Linear(128, 64)
+        self.linear3 = nn.Linear(64, 64)
+
+    def forward(self, x):
+        x = self.conv1(x)
+        x = nn.functional.relu(x)
+        x = self.maxpool(x)
+        # x = self.conv2(x)
+        # x = nn.functional.relu(x)
+        # x = self.maxpool(x)
         x = self.flat(x)
         x = self.linear1(x)
         x = nn.functional.relu(x)
@@ -343,7 +376,8 @@ def plot_statistics(train_loss,
     plt.figure()
 
 if __name__ == '__main__':
-    x, y = build_data_1d(s10)
+    x, y = build_data_2d(s10)
+
     total_len = len(x)
     print(f'Total data length: {total_len}')
     data_len = int(total_len * 0.8)
@@ -358,10 +392,10 @@ if __name__ == '__main__':
     train_dataloader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True)
     val_dataloader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=True)
 
-    model = CNN1D()
+    model = CNN2D()
     loss_func = nn.BCELoss()
     print(model)
-    print(summary(model, (BATCH_SIZE, 64, 1)))
+    print(summary(model, (BATCH_SIZE, 1, 8, 8)))
 
     OPTIMIZER = torch.optim.Adam(model.parameters(), lr=LR)
 
