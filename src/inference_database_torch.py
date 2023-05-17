@@ -102,6 +102,37 @@ class CNN1D(nn.Module):
 
         return x
 
+class CNN2D(nn.Module):
+    def __init__(self) -> None:
+        super(CNN2D, self).__init__()
+        self.conv1 = nn.Conv2d(in_channels=1, out_channels=16, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(in_channels=16, out_channels=32, kernel_size=3, padding=1)
+        self.flat  = nn.Flatten()
+        self.drop = nn.Dropout(0.2)
+        
+        self.maxpool = nn.MaxPool2d(kernel_size=2, stride=1)
+        self.linear1 = nn.Linear(784, 128)
+        self.linear2 = nn.Linear(128, 64)
+        self.linear3 = nn.Linear(64, 64)
+
+    def forward(self, x):
+        x = self.conv1(x)
+        x = nn.functional.relu(x)
+        x = self.maxpool(x)
+        # x = self.conv2(x)
+        # x = nn.functional.relu(x)
+        # x = self.maxpool(x)
+        x = self.flat(x)
+        x = self.linear1(x)
+        x = nn.functional.relu(x)
+        x = self.linear2(x)
+        x = nn.functional.relu(x)
+        x = self.linear3(x)
+        x = nn.functional.sigmoid(x)
+
+        return x
+
+
 ### Othello Board dataset
 class OthelloBoard(Dataset):
     def __init__(self, x, y):
@@ -113,6 +144,18 @@ class OthelloBoard(Dataset):
         train_x = np.expand_dims(self.x[ind], axis=1)
         train_y = self.y[ind]
         return torch.tensor(train_x), torch.tensor(train_y)
+
+class OthelloBoard2d(Dataset):
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+    def __len__(self):
+        return len(self.x)
+    def __getitem__(self, ind):
+        train_x = np.expand_dims(self.x[ind], axis=0)
+        train_y = self.y[ind]
+        return torch.tensor(train_x), torch.tensor(train_y)
+
 
 ### Customize accuracy function
 def evaluate_accuracy(pred, label):
@@ -156,17 +199,17 @@ def inference(data_loader, model):
     return test_avg_acc
 
 if __name__ == '__main__':
-    model = CNN1D()
-    model.load_state_dict(torch.load('E:/hsuanchia_e/Othello_2022/src/s10_allvalid_multilabel_weights/torch/epoch_261_trainLoss_0.0453_trainAcc_60.19_valLoss_0.055_valAcc_56.7.pth'))
+    model = CNN2D()
+    model.load_state_dict(torch.load('D:/AIIA_En/othello/Othello_2022/src/s10_allvalid_multilabel_weights_conv2d/torch/epoch_228_trainLoss_0.0604_trainAcc_57.26_valLoss_0.07_valAcc_54.12.pth'))
     model.to(device)
     test_path = './train_data_0130/test_data_0214_s10_valid_100001.txt'
 
     hit, total = 0, 0
     get_ans = True
-    test_x, test_y = build_test_data_1d(test_path)
+    test_x, test_y = build_test_data_2d(test_path)
     print(f'Data length: {len(test_x)}')
 
-    test_ds = OthelloBoard(test_x, test_y)
+    test_ds = OthelloBoard2d(test_x, test_y)
     test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE)
 
     test_acc = inference(test_loader, model)
